@@ -1,235 +1,390 @@
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, simpledialog
 import sqlite3
 import random
+import datetime
 
-class FinanceVille:
-    def __init__(self, master):
-        self.master = master
-        self.master.title("💰 FinanceVille: Economic Adventure")
-        self.master.geometry("500x600")
+# ------------------- LOGIN / REGISTER -------------------
 
-        # Game state
-        self.balance = 1000
-        self.population_happiness = 50
-        self.tax_rate = 10
-        self.dark_mode = False
-        self.achievements = []
+class LoginWindow:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("FinanceVille Login")
+        self.root.geometry("400x300")
+        self.root.configure(bg="#ECEFF1")
 
-        # Database
         self.conn = sqlite3.connect('financeville.db')
         self.cursor = self.conn.cursor()
-        self.create_table()
-        self.load_last_game()
+        self.create_users_table()
+        self.create_quiz_table()
 
-        self.create_widgets()
-        self.update_labels()
+        tk.Label(root, text="Login to FinanceVille", font=("Helvetica", 16, "bold"), bg="#ECEFF1").pack(pady=20)
+        tk.Label(root, text="Username:", bg="#ECEFF1").pack()
+        self.username_entry = tk.Entry(root)
+        self.username_entry.pack()
 
-    def create_table(self):
-        self.cursor.execute('''CREATE TABLE IF NOT EXISTS game_data (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            balance INTEGER,
-                            happiness INTEGER,
-                            taxes INTEGER
-                            )''')
+        tk.Label(root, text="Password:", bg="#ECEFF1").pack()
+        self.password_entry = tk.Entry(root, show="*")
+        self.password_entry.pack()
+
+        tk.Button(root, text="Login", width=15, command=self.login, bg="#4CAF50", fg="white").pack(pady=10)
+        tk.Button(root, text="Register", width=15, command=self.register, bg="#2196F3", fg="white").pack()
+
+    def create_users_table(self):
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                username TEXT PRIMARY KEY,
+                password TEXT,
+                balance INTEGER,
+                savings INTEGER,
+                happiness INTEGER,
+                tax_rate INTEGER
+            )
+        ''')
         self.conn.commit()
 
-    def save_game(self):
-        self.cursor.execute("INSERT INTO game_data (balance, happiness, taxes) VALUES (?, ?, ?)",
-                            (self.balance, self.population_happiness, self.tax_rate))
+    def create_quiz_table(self):
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS quizzes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                question TEXT,
+                option1 TEXT,
+                option2 TEXT,
+                option3 TEXT,
+                option4 TEXT,
+                correct_option INTEGER
+            )
+        ''')
         self.conn.commit()
-        messagebox.showinfo("Game Saved", "Your game has been saved!")
 
-    def load_last_game(self):
-        self.cursor.execute("SELECT balance, happiness, taxes FROM game_data ORDER BY id DESC LIMIT 1")
+    def login(self):
+        username = self.username_entry.get().strip()
+        password = self.password_entry.get().strip()
+        self.cursor.execute("SELECT * FROM users WHERE username=? AND password=?", (username, password))
+        user = self.cursor.fetchone()
+        if user:
+            self.root.destroy()
+            root = tk.Tk()
+            app = FinanceVille(root, username, is_admin=(username == "admin"))
+            root.mainloop()
+        else:
+            messagebox.showerror("Login Failed", "Incorrect username or password.")
+
+    def register(self):
+        username = self.username_entry.get().strip()
+        password = self.password_entry.get().strip()
+        if not username or not password:
+            messagebox.showwarning("Missing Data", "Please enter both username and password.")
+            return
+        try:
+            self.cursor.execute("INSERT INTO users VALUES (?, ?, 1000, 0, 50, 10)", (username, password))
+            self.conn.commit()
+            messagebox.showinfo("Registered", "Account created successfully! You can now log in.")
+        except sqlite3.IntegrityError:
+            messagebox.showerror("Error", "Username already exists.")
+# ------------------- GŁÓWNA GRA -------------------
+
+class FinanceVille:
+    def __init__(self, master, username, is_admin=False):
+        self.master = master
+        self.master.title("FinanceVille – Economic Adventure")
+        self.master.geometry("900x600")
+        self.master.configure(bg="#ECEFF1")
+        self.username = username
+        self.is_admin = is_admin
+
+        self.conn = sqlite3.connect('financeville.db')
+        self.cursor = self.conn.cursor()
+
+        self.load_user_data()
+
+        self.dark_mode = False
+        self.achievements = []
+        self.event_log = []
+
+        self.build_gui()
+        self.update_info()
+
+    def load_user_data(self):
+        self.cursor.execute("SELECT balance, savings, happiness, tax_rate FROM users WHERE username=?", (self.username,))
         data = self.cursor.fetchone()
         if data:
-            self.balance, self.population_happiness, self.tax_rate = data
-            messagebox.showinfo("Game Loaded", "Previous game loaded successfully!")
-
-    def create_widgets(self):
-        self.master.configure(bg="#f5f5f5")
-        tk.Label(self.master, text="🏦 FinanceVille", font=("Arial", 20, "bold"), bg="#f5f5f5").pack(pady=10)
-
-        self.balance_label = tk.Label(self.master, text="", font=("Arial", 14), bg="#f5f5f5")
-        self.balance_label.pack(pady=5)
-
-        self.happiness_label = tk.Label(self.master, text="", font=("Arial", 14), bg="#f5f5f5")
-        self.happiness_label.pack(pady=5)
-
-        self.tax_label = tk.Label(self.master, text="", font=("Arial", 14), bg="#f5f5f5")
-        self.tax_label.pack(pady=5)
-
-        btn_frame = tk.Frame(self.master, bg="#f5f5f5")
-        btn_frame.pack(pady=20)
-
-        tk.Button(btn_frame, text="📈 Invest in Stocks", width=20, command=self.invest_stocks, bg="#4CAF50", fg="white").grid(row=0, column=0, padx=5, pady=5)
-        tk.Button(btn_frame, text="🏫 Build School ($300)", width=20, command=self.build_school, bg="#2196F3", fg="white").grid(row=1, column=0, padx=5, pady=5)
-        tk.Button(btn_frame, text="💳 Set Taxes", width=20, command=self.set_taxes, bg="#FFC107", fg="black").grid(row=2, column=0, padx=5, pady=5)
-        tk.Button(btn_frame, text="📝 Financial Quiz", width=20, command=self.take_quiz, bg="#9C27B0", fg="white").grid(row=3, column=0, padx=5, pady=5)
-        tk.Button(btn_frame, text="📅 Daily Challenge", width=20, command=self.daily_challenge, bg="#00bcd4", fg="white").grid(row=4, column=0, padx=5, pady=5)
-        tk.Button(btn_frame, text="📊 View Stats", width=20, command=self.show_stats, bg="#607d8b", fg="white").grid(row=5, column=0, padx=5, pady=5)
-        tk.Button(btn_frame, text="🌓 Toggle Dark Mode", width=20, command=self.toggle_dark_mode, bg="#555", fg="white").grid(row=6, column=0, padx=5, pady=5)
-        tk.Button(btn_frame, text="💾 Save Game", width=20, command=self.save_game, bg="#FF5722", fg="white").grid(row=7, column=0, padx=5, pady=5)
-
-    def update_labels(self):
-        self.balance_label.config(text=f"💵 Balance: ${self.balance}")
-        self.happiness_label.config(text=f"😊 Happiness: {self.population_happiness}%")
-        self.tax_label.config(text=f"📊 Tax Rate: {self.tax_rate}%")
-
-    def check_achievements(self):
-        new_achievements = []
-
-        if self.balance >= 2000 and "Wealthy!" not in self.achievements:
-            new_achievements.append("Wealthy!")
-
-        if self.population_happiness >= 90 and "Loved by the People" not in self.achievements:
-            new_achievements.append("Loved by the People")
-
-        if self.tax_rate == 0 and "Tax-Free Economy" not in self.achievements:
-            new_achievements.append("Tax-Free Economy")
-
-        for achievement in new_achievements:
-            self.achievements.append(achievement)
-            messagebox.showinfo("🎉 Achievement Unlocked!", f"You unlocked: {achievement}")
-
-    def invest_stocks(self):
-        result = random.choice([-200, -100, 0, 100, 200, 300, 500])
-        self.balance += result
-        if result >= 0:
-            messagebox.showinfo("Investment Result", f"You earned ${result}!")
+            self.balance, self.savings, self.population_happiness, self.tax_rate = data
         else:
-            messagebox.showwarning("Investment Result", f"You lost ${-result}.")
-        self.update_labels()
-        self.check_achievements()
+            self.balance, self.savings, self.population_happiness, self.tax_rate = 1000, 0, 50, 10
+
+    def save_user_data(self):
+        self.cursor.execute("""
+            UPDATE users SET balance=?, savings=?, happiness=?, tax_rate=? WHERE username=?
+        """, (self.balance, self.savings, self.population_happiness, self.tax_rate, self.username))
+        self.conn.commit()
+        self.log_event("Progress saved.")
+    def build_gui(self):
+        self.font_title = ("Helvetica", 20, "bold")
+        self.font_label = ("Helvetica", 13)
+        self.font_button = ("Helvetica", 11, "bold")
+
+        self.left_frame = tk.Frame(self.master, bg="#ECEFF1", padx=20, pady=20)
+        self.left_frame.pack(side="left", fill="y")
+
+        self.right_frame = tk.Frame(self.master, bg="#FFFFFF", padx=20, pady=20, relief="sunken", bd=2)
+        self.right_frame.pack(side="right", fill="both", expand=True)
+
+        tk.Label(self.left_frame, text=f"💼 {self.username}'s FinanceVille", font=self.font_title, bg="#ECEFF1", fg="#37474F").pack(anchor="w", pady=(0, 10))
+
+        self.label_balance = tk.Label(self.left_frame, font=self.font_label, bg="#ECEFF1")
+        self.label_balance.pack(anchor="w", pady=5)
+
+        self.label_savings = tk.Label(self.left_frame, font=self.font_label, bg="#ECEFF1")
+        self.label_savings.pack(anchor="w", pady=5)
+
+        self.label_happiness = tk.Label(self.left_frame, font=self.font_label, bg="#ECEFF1")
+        self.label_happiness.pack(anchor="w", pady=5)
+
+        self.label_tax = tk.Label(self.left_frame, font=self.font_label, bg="#ECEFF1")
+        self.label_tax.pack(anchor="w", pady=5)
+
+        actions = [
+            ("📈 Invest in Stocks", self.invest_stocks),
+            ("🏫 Build School ($300)", self.build_school),
+            ("💳 Set Taxes", self.set_taxes),
+            ("📝 Financial Quiz", self.take_quiz),
+            ("📅 Daily Challenge", self.daily_challenge),
+            ("🏦 Open Bank", self.open_bank),
+            ("📊 View Stats", self.show_stats),
+            ("🌓 Dark Mode", self.toggle_dark_mode),
+            ("💾 Save Game", self.save_user_data),
+            ("📤 Export Progress", self.export_to_txt),
+        ]
+
+        if self.is_admin:
+            actions.append(("🧠 Edit Quiz (Admin)", self.edit_quiz))
+
+        for text, cmd in actions:
+            tk.Button(self.left_frame, text=text, font=self.font_button, bg="#455A64", fg="white",
+                      width=22, pady=6, command=cmd).pack(anchor="w", pady=4)
+
+        tk.Label(self.right_frame, text="📜 Event Log", font=("Helvetica", 14, "bold"),
+                 bg="#FFFFFF", fg="#263238").pack(anchor="w")
+
+        self.log_box = tk.Text(self.right_frame, height=25, state="disabled", bg="#FAFAFA", fg="#000000",
+                               font=("Courier", 10), wrap="word")
+        self.log_box.pack(fill="both", expand=True, pady=(10, 0))
+
+    def update_info(self):
+        self.label_balance.config(text=f"💵 Balance: ${self.balance}")
+        self.label_savings.config(text=f"🏦 Savings: ${self.savings}")
+        self.label_happiness.config(text=f"😊 Happiness: {self.population_happiness}%")
+        self.label_tax.config(text=f"📊 Tax Rate: {self.tax_rate}%")
+
+    def log_event(self, text):
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        self.log_box.config(state="normal")
+        self.log_box.insert("end", f"[{timestamp}] {text}\n")
+        self.log_box.config(state="disabled")
+        self.log_box.see("end")
+    def invest_stocks(self):
+        result = random.choice([-200, -100, 0, 100, 300, 500])
+        self.balance += result
+        msg = f"You earned ${result} from stocks!" if result > 0 else f"You lost ${-result} in stocks!"
+        self.log_event(msg)
+        self.update_info()
 
     def build_school(self):
         if self.balance >= 300:
             self.balance -= 300
             self.population_happiness += 10
-            messagebox.showinfo("Build School", "School built! Happiness +10%.")
+            self.log_event("Built a school. Happiness +10%.")
         else:
-            messagebox.showerror("Not enough money", "You need at least $300.")
-        self.update_labels()
-        self.check_achievements()
+            self.log_event("Not enough funds to build a school.")
+            messagebox.showerror("Error", "You need at least $300.")
+        self.update_info()
 
     def set_taxes(self):
-        tax_window = tk.Toplevel(self.master)
-        tax_window.title("Set Tax Rate")
-        tax_window.geometry("300x150")
-        tax_window.configure(bg="#f5f5f5")
-
-        tk.Label(tax_window, text="Choose tax rate (0–50%)", bg="#f5f5f5").pack(pady=10)
-        tax_scale = tk.Scale(tax_window, from_=0, to=50, orient="horizontal")
-        tax_scale.set(self.tax_rate)
-        tax_scale.pack()
+        window = tk.Toplevel(self.master)
+        window.title("Set Tax Rate")
+        tk.Label(window, text="Set new tax rate (0–50%)").pack(pady=10)
+        scale = tk.Scale(window, from_=0, to=50, orient="horizontal")
+        scale.set(self.tax_rate)
+        scale.pack()
 
         def apply():
-            self.tax_rate = tax_scale.get()
+            self.tax_rate = scale.get()
             revenue = self.tax_rate * 10
-            happiness_change = -self.tax_rate // 5
             self.balance += revenue
-            self.population_happiness += happiness_change
-            messagebox.showinfo("Taxes Applied", f"Revenue: ${revenue}, Happiness: {happiness_change}%")
-            tax_window.destroy()
-            self.update_labels()
-            self.check_achievements()
+            self.population_happiness -= self.tax_rate // 5
+            self.log_event(f"Set taxes to {self.tax_rate}%. Revenue: ${revenue}.")
+            self.update_info()
+            window.destroy()
 
-        tk.Button(tax_window, text="Apply", command=apply, bg="#4CAF50", fg="white").pack(pady=10)
+        tk.Button(window, text="Apply", command=apply).pack(pady=10)
 
     def take_quiz(self):
-        quiz_window = tk.Toplevel(self.master)
-        quiz_window.title("Financial Quiz")
-        quiz_window.geometry("400x250")
-        quiz_window.configure(bg="#f5f5f5")
+        self.cursor.execute("SELECT * FROM quizzes ORDER BY RANDOM() LIMIT 1")
+        data = self.cursor.fetchone()
+        if not data:
+            messagebox.showinfo("Quiz", "No quiz questions available.")
+            return
 
-        question = "What does 'inflation' mean?"
-        options = [
-            ("A general increase in prices", True),
-            ("A drop in wages", False),
-            ("More taxes", False),
-            ("Lower banking interest", False)
-        ]
-
-        tk.Label(quiz_window, text=question, wraplength=380, bg="#f5f5f5").pack(pady=10)
-        answer_var = tk.StringVar()
-
-        for text, _ in options:
-            tk.Radiobutton(quiz_window, text=text, variable=answer_var, value=text, bg="#f5f5f5").pack(anchor='w')
-
-        def submit():
-            selected = answer_var.get()
-            correct = next(opt[0] for opt in options if opt[1])
-            if selected == correct:
-                self.balance += 150
-                messagebox.showinfo("Correct!", "You earned $150.")
-            else:
-                messagebox.showinfo("Incorrect", f"The correct answer was: {correct}")
-            quiz_window.destroy()
-            self.update_labels()
-            self.check_achievements()
-
-        tk.Button(quiz_window, text="Submit", command=submit, bg="#4CAF50", fg="white").pack(pady=10)
-
-    def daily_challenge(self):
-        challenges = [
-            ("You saved $100. What should you do?", ["Spend", "Invest", "Burn it", "Hide it"], "Invest"),
-            ("You got a high-interest loan. What's most important?", ["Amount", "Rate", "Deadline", "Bank name"], "Rate")
-        ]
-        question, options, correct = random.choice(challenges)
+        qid, question, *options, correct = data
 
         win = tk.Toplevel(self.master)
+        win.title("Quiz")
+        tk.Label(win, text=question, wraplength=350).pack(pady=5)
+        answer_var = tk.IntVar()
+
+        for i, opt in enumerate(options, start=1):
+            tk.Radiobutton(win, text=opt, variable=answer_var, value=i).pack(anchor="w")
+
+        def check_answer():
+            if answer_var.get() == correct:
+                self.balance += 150
+                self.log_event("Correct quiz answer! +$150")
+            else:
+                self.log_event("Wrong answer in quiz.")
+            self.update_info()
+            win.destroy()
+
+        tk.Button(win, text="Submit", command=check_answer).pack(pady=5)
+
+    def daily_challenge(self):
+        win = tk.Toplevel(self.master)
         win.title("Daily Challenge")
-        win.geometry("400x250")
-        win.configure(bg="#e0f7fa")
-
-        tk.Label(win, text=question, wraplength=380, font=("Arial", 12), bg="#e0f7fa").pack(pady=10)
-
+        tk.Label(win, text="What’s the best use of a surprise bonus?", wraplength=350).pack(pady=5)
         answer_var = tk.StringVar()
-        for opt in options:
-            tk.Radiobutton(win, text=opt, variable=answer_var, value=opt, bg="#e0f7fa").pack(anchor='w')
+        options = ["Buy clothes", "Invest it", "Hide it", "Party!"]
+        correct = "Invest it"
 
-        def submit():
+        for opt in options:
+            tk.Radiobutton(win, text=opt, variable=answer_var, value=opt).pack(anchor="w")
+
+        def check():
             if answer_var.get() == correct:
                 self.balance += 200
-                messagebox.showinfo("Correct!", "You earned $200!")
+                self.log_event("Daily challenge completed! +$200")
             else:
-                messagebox.showinfo("Incorrect", f"Correct answer: {correct}")
+                self.log_event("Wrong answer in daily challenge.")
+            self.update_info()
             win.destroy()
-            self.update_labels()
-            self.check_achievements()
 
-        tk.Button(win, text="Submit", command=submit, bg="#009688", fg="white").pack(pady=10)
+        tk.Button(win, text="Submit", command=check).pack(pady=5)
+
+    def open_bank(self):
+        win = tk.Toplevel(self.master)
+        win.title("Bank")
+        tk.Label(win, text="Transfer amount:").pack()
+        entry = tk.Entry(win)
+        entry.pack(pady=5)
+
+        def deposit():
+            try:
+                amt = int(entry.get())
+                if self.balance >= amt:
+                    self.balance -= amt
+                    self.savings += amt
+                    self.log_event(f"Deposited ${amt} into savings.")
+                else:
+                    messagebox.showerror("Error", "Not enough balance.")
+                self.update_info()
+            except:
+                messagebox.showerror("Invalid input", "Enter a valid number.")
+
+        def withdraw():
+            try:
+                amt = int(entry.get())
+                if self.savings >= amt:
+                    self.savings -= amt
+                    self.balance += amt
+                    self.log_event(f"Withdrew ${amt} from savings.")
+                else:
+                    messagebox.showerror("Error", "Not enough savings.")
+                self.update_info()
+            except:
+                messagebox.showerror("Invalid input", "Enter a valid number.")
+
+        tk.Button(win, text="Deposit", command=deposit).pack(pady=2)
+        tk.Button(win, text="Withdraw", command=withdraw).pack(pady=2)
 
     def show_stats(self):
         stats = f"""
-        💵 Balance: ${self.balance}
-        😊 Happiness: {self.population_happiness}%
-        📊 Tax Rate: {self.tax_rate}%
-        🏅 Achievements: {', '.join(self.achievements) if self.achievements else 'None'}
+Balance: ${self.balance}
+Savings: ${self.savings}
+Happiness: {self.population_happiness}%
+Tax Rate: {self.tax_rate}%
+Achievements: {', '.join(self.achievements) if self.achievements else 'None'}
         """
         messagebox.showinfo("Your Stats", stats)
 
     def toggle_dark_mode(self):
         self.dark_mode = not self.dark_mode
-        bg_color = "#2c2c2c" if self.dark_mode else "#f5f5f5"
-        fg_color = "white" if self.dark_mode else "black"
-        self.master.configure(bg=bg_color)
+        bg = "#263238" if self.dark_mode else "#ECEFF1"
+        fg = "white" if self.dark_mode else "#000000"
+        self.master.configure(bg=bg)
+        self.left_frame.configure(bg=bg)
+        self.right_frame.configure(bg="#37474F" if self.dark_mode else "#FFFFFF")
+        for widget in self.left_frame.winfo_children():
+            widget.configure(bg=bg, fg=fg)
+        self.log_box.configure(bg="#263238" if self.dark_mode else "#FAFAFA", fg=fg)
 
-        for widget in self.master.winfo_children():
-            try:
-                widget.configure(bg=bg_color, fg=fg_color)
-                for child in widget.winfo_children():
-                    child.configure(bg=bg_color, fg=fg_color)
-            except:
-                pass
+    def export_to_txt(self):
+        filename = f"financeville_report_{self.username}.txt"
+        with open(filename, "w", encoding="utf-8") as file:
+            file.write("📋 FinanceVille Progress Report\n")
+            file.write(f"User: {self.username}\n")
+            file.write(f"Balance: ${self.balance}\n")
+            file.write(f"Savings: ${self.savings}\n")
+            file.write(f"Happiness: {self.population_happiness}%\n")
+            file.write(f"Tax Rate: {self.tax_rate}%\n")
+            file.write("Achievements: " + (", ".join(self.achievements) if self.achievements else "None") + "\n")
+            file.write(f"Exported: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        self.log_event(f"Progress exported to {filename}")
+        messagebox.showinfo("Export", f"Exported to {filename}")
 
-    def close_app(self):
-        self.conn.close()
-        self.master.destroy()
+    def edit_quiz(self):
+        win = tk.Toplevel(self.master)
+        win.title("Admin Quiz Editor")
+
+        def add_question():
+            q = simpledialog.askstring("New Question", "Enter the question:")
+            if not q:
+                return
+            opts = []
+            for i in range(1, 5):
+                opt = simpledialog.askstring("Option", f"Enter option {i}:")
+                opts.append(opt)
+            correct = simpledialog.askinteger("Correct Answer", "Enter number of correct option (1-4):")
+            if correct not in [1, 2, 3, 4]:
+                messagebox.showerror("Error", "Invalid correct option number.")
+                return
+            self.cursor.execute("INSERT INTO quizzes (question, option1, option2, option3, option4, correct_option) VALUES (?, ?, ?, ?, ?, ?)",
+                                (q, *opts, correct))
+            self.conn.commit()
+            self.log_event("Admin added new quiz question.")
+            view_questions()
+
+        def view_questions():
+            for widget in frame.winfo_children():
+                widget.destroy()
+            self.cursor.execute("SELECT * FROM quizzes")
+            for row in self.cursor.fetchall():
+                qid, q, o1, o2, o3, o4, correct = row
+                text = f"{qid}. {q} (Correct: {correct})"
+                tk.Label(frame, text=text, wraplength=380).pack(anchor="w")
+                tk.Button(frame, text="🗑 Delete", command=lambda i=qid: delete_question(i)).pack()
+
+        def delete_question(qid):
+            self.cursor.execute("DELETE FROM quizzes WHERE id=?", (qid,))
+            self.conn.commit()
+            self.log_event(f"Admin deleted question ID {qid}.")
+            view_questions()
+
+        tk.Button(win, text="➕ Add Question", command=add_question).pack(pady=5)
+        frame = tk.Frame(win)
+        frame.pack(fill="both", expand=True)
+        view_questions()
+
 
 if __name__ == "__main__":
     root = tk.Tk()
-    app = FinanceVille(root)
-    root.protocol("WM_DELETE_WINDOW", app.close_app)
+    login = LoginWindow(root)
     root.mainloop()
